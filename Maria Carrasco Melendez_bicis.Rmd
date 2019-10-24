@@ -1,0 +1,309 @@
+---
+title: "prediccion Bicis"
+author: "Maria Carrasco Melendez"
+date: "22/10/2019"
+output: pdf_document
+ 
+---
+
+
+```{r setup, include=FALSE}
+chooseCRANmirror(graphics=FALSE, ind=1)
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+##
+
+```{r}
+library(readr)
+
+install.packages("lmtest")
+install.packages("lmtest", repos = "http://cran.us.r-project.org")
+install.packages("XQuartz")
+
+
+
+
+library(here)
+day <- read_csv("day.csv")
+View(day)
+
+```
+
+## 
+
+```{r}
+names(day)[16]<-"total"
+names(day)[2]<-"date"
+names(day)[4]<-"year"
+names(day)[5]<-"month"
+
+```
+Cargamos el resto de librerías
+```{r}
+library(tidyverse)
+library(skimr) # Beautiful Summarize
+library(magrittr) # Pipe operators
+library(corrplot) # Correlations
+library(ggcorrplot)  # Correlations
+library(PerformanceAnalytics) # Correlations
+library(leaps) # Model selection
+library(caret) # Cross Validation
+library(bestglm) # Cross Validation
+library(glmnet) # Regularization
+library(knitr)
+library(ISLR)
+library(gam)
+library(fBasics)
+library(nortest)
+library(MASS)
+library(rsample)
+
+```
+Es como un summary pero más completo, a tarvés de sus resuktados llegamos a la conclusión de que no hay valores no explicados, datos repetidos ni NA.
+
+```{r}
+skim(day)
+```
+
+Aislamos los valores que creemos menos influyentes y realizamos las correlaciones. Eliminamos las variables que se comportan como factor
+EDA
+```{r}
+prueba<- c("date", "instant")
+
+#ANALIZAMOS PROBLEMAS DE MULTICOLINEALIDAD, para ello analizamos las correlaciones, tomando valores azul oscuros las variables muy correlacionadas y valores rojos las más independientes.
+
+corrplot(cor(day %>% 
+               select_at(vars(-prueba)), 
+             use = "complete.obs"), 
+         method = "circle",type = "upper")
+
+
+```
+OTRAS CORRELACIONES
+
+```{r}
+#1
+
+ggcorrplot(cor(day %>% 
+               select_at(vars(-prueba)), 
+            use = "complete.obs"),
+            hc.order = TRUE,
+            type = "lower",  lab = TRUE)
+```
+```{r}
+#2. Las lineas rectas indican que no existe correlacion entre ellas, y las estrellas cuales están correlacionadas.
+#las estrellas te dicen la asociacion, si tiene estrellas y es 0.2 indica que es significativo
+
+chart.Correlation(day %>%  #las lineas rectas rojas, indican que no hay correlacion
+               select_at(vars(-prueba)),
+               histogram=TRUE, pch=19)
+```
+
+
+Obtenemos los grados de libertad, los cuales se calculan únicamente para aquellas variables que no sean categóricas ni dumbies.
+
+```{r}
+dftemp<-smooth.spline(day$temp, day$total, cv=TRUE)
+dfatemp<-smooth.spline(day$atemp, day$total, cv=TRUE)
+dfhum<-smooth.spline(day$hum, day$total, cv=TRUE)
+dfwindspeed<-smooth.spline(day$windspeed, day$total, cv=TRUE)
+dfcasual<-smooth.spline(day$casual, day$total, cv=TRUE)
+dfregistered<-smooth.spline(day$registered, day$total, cv=TRUE)
+
+
+dftemp$df
+dfatemp$df
+dfhum$df
+dfwindspeed$df
+dfcasual$df
+dfregistered$df
+
+```
+
+
+Transformacion de variables a categoricas para poder incluirlas en el modelo:
+
+```{r}
+day$weekday <- as.factor(day$weekday)
+day$weathersit<- as.factor(day$weathersit)
+day$season <- as.factor(day$season)
+day$month <- as.factor(day$month)
+
+#Las DUMBIES no hay que cambiarlas a factor pero son: holiday, season y workingday 
+```
+
+Modelo GAM
+
+```{r}
+gam1 <- gam(total~ s(temp, df=9.103704) + s(windspeed, df=6.007664)+ s(atemp, df=8.805497)+ s(hum, df=4.548876)+ s(casual, df=11.27571)+ s(registered, df=12.95976) + season + weekday + workingday + weathersit + month + holiday + year,
+            data=day)
+
+plot(gam1, se=TRUE, col='red')
+
+```
+
+
+
+```{r}
+summary(gam1)
+```
+Elimino season, workingday, y weekday
+
+```{r}
+
+gam2 <- gam(total~ s(temp, df=9.103704) + s(windspeed, df=6.007664)+ s(atemp, df=8.805497)+ s(hum, df=4.548876)+ s(casual, df=11.27571)+ s(registered, df=12.95976) + weathersit + month + holiday + year,
+            data=day)
+
+plot(gam2, se=TRUE, col='red')
+```
+
+
+```{r}
+summary(gam2)
+```
+
+Elimino weathersit y month
+```{r}
+gam3 <- gam(total~ s(temp, df=9.103704) + s(windspeed, df=6.007664)+ s(atemp, df=8.805497)+ s(hum, df=4.548876)+ s(casual, df=11.27571)+ s(registered, df=12.95976)+ holiday + year,
+            data=day)
+
+plot(gam3, se=TRUE, col='red')
+```
+
+
+```{r}
+summary(gam3)
+```
+
+Elimino Holiday y year
+```{r}
+gam4 <- gam(total~ s(temp, df=9.103704) + s(windspeed, df=6.007664)+ s(atemp, df=8.805497)+ s(hum, df=4.548876)+ s(casual, df=11.27571)+ s(registered, df=12.95976),
+            data=day)
+
+plot(gam4, se=TRUE, col='red')
+```
+
+```{r}
+summary(gam4)
+```
+
+Realizamps el este
+```{r}
+anova(gam1, gam2, gam3, gam4, test='F') #Nos interesa el que menor residuo tenga
+```
+Cross validation
+
+```{r}
+#Una vez escogido el modelo, vamos a proceder a dividir nuestra base de datos en 
+#train y test para predecir. 
+
+set.seed(123)
+day_split <- initial_split(day, prop =.7, strata = "total")
+day_train <- training(day_split)
+day_test <- testing(day_split)
+
+#Tenemos la base de datos dividida en 70/30, y vamos a proceder a introducir nuestro modelo
+#en el test para saber como predice.
+
+gam_train <- gam(total~ s(temp, df=9.103704) + s(windspeed, df=6.007664)+ s(atemp, df=8.805497)+ s(hum, df=4.548876)+ s(casual, df=11.27571)+ s(registered, df=12.95976) + season + weekday + workingday + weathersit + month + holiday + year,data=day_train)
+
+plot(gam_train, se=TRUE, col='red')
+```
+```{r}
+summary(gam_train)
+```
+Prediccion 
+```{r}
+#Vamos a predecir para saber el error. Vemos que es practicamente 0 por lo que 
+#voy a realizar otro modelo sin las variables casual y register.
+predict_modelo_gam <- predict(gam1,day_test)
+test_error_gam <- mean((predict_modelo_gam - day_test$total)^2)
+test_error_gam
+```
+
+MODELO 2
+
+```{r}
+#Realizamos los posibles modelos primero sin las variables casual y register
+gam1.2 <- gam(total~ s(temp, df=9.103704) + s(windspeed, df=6.007664)+ s(atemp, df=8.805497)+ s(hum, df=4.548876)+ weekday + workingday + weathersit + month + holiday + year,
+            data=day)
+
+plot(gam1.2, se=TRUE, col='red')
+```
+```{r}
+summary(gam1.2)
+```
+
+
+```{r}
+#En este gam lo realizamos quitando weathersit. 
+gam1.2.2 <- gam(total~ s(temp, df=9.103704) + s(windspeed, df=6.007664)+ s(atemp, df=8.805497)+ s(hum, df=4.548876) + weekday + workingday + year, data=day)
+plot(gam1.2.2, se=TRUE, col='red')
+```
+```{r}
+summary(gam1.2.2)
+```
+```{r}
+#Procedemos a hacer el ANOVA para saber cual de los dos modelos es mejor teniendo en cuenta
+#el residuo que tiene uno, el que menor residuo tenga será el que escojamos. En nuestro caso,   
+#el mejor modelo es el gam.1.2
+
+anova(gam1.2,gam1.2.2, test="F")
+```
+
+CROSS VALIDATION 2
+```{r}
+#Una vez escogido el modelo, vamos a proceder a dividir nuestra base de datos en 
+#train y test para predecir. 
+
+set.seed(123)
+day_split2 <- initial_split(day, prop =.7, strata = "total")
+day_train2 <- training(day_split2)
+day_test2 <- testing(day_split2)
+
+#Tenemos la base de datos dividida en 70/30, y vamos a proceder a introducir nuestro modelo
+#en el test para saber como predice.
+
+gam_train2 <- gam(total~ s(temp, df=9.103704) + s(windspeed, df=6.007664)+ s(atemp, df=8.805497)+ s(hum, df=4.548876)+ weekday + workingday + weathersit + month + holiday + year,
+            data=day)
+
+plot(gam_train2, se=TRUE, col='red')
+```
+```{r}
+summary(gam_train2)
+```
+Prediccion 2
+
+```{r}
+#Vamos a predecir para saber el error. Vemos que es practicamente 0 por lo que 
+#voy a realizar otro modelo sin las variables casual y register.
+predict_modelo_gam2 <- predict(gam1.2,day_test)
+test_error_gam2 <- mean((predict_modelo_gam2 - day_test$total)^2)
+test_error_gam2
+```
+
+
+```{r}
+sqrt(test_error_gam2)
+```
+Tras la realización de los dos modelos, concluimos que las variables casual y register no son necesarias ya que ambas son la suma de el total, variable explicada en el proyecto.
+
+Centrandonos en el segundo modelo, aplicando los test pertinentes, tenemos 
+un error de 757.903 que teniendo en cuenta que la media de registros esta cerca de 4000, concluimos que es buen error. 
+
+
+
+```{r}
+sink("test.log")
+test.log
+sink(NULL)
+
+```
+
+
+
+
+
+
+
