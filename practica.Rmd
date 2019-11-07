@@ -1,0 +1,241 @@
+---
+title: "practica_GLM_Maria_Carrasco"
+author: "Maria Carrasco Melendez"
+date: "11/7/2019"
+output: 
+  pdf_document:
+    latex_engine: xelatex
+
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+
+```{r}
+library(readr)
+loan <- read_csv("loan.csv", col_types = cols(int_rate = col_number(), revol_util = col_number()))
+
+```
+
+
+
+```{r}
+library(readr)
+library(knitr)
+library(rmarkdown)
+library(faraway)
+library(ISLR)
+library(ggplot2)
+library(ggfortify)
+library(boot)
+library(ROCR)
+library(skimr)
+library(dummies)
+library(MASS)
+
+```
+
+
+
+```{r}
+#Seleccionamos las variables más representativas en función de la lectura propuesta.
+loan2 <- dplyr::select(loan, c("int_rate", "grade", "home_ownership", "revol_util", "loan_amnt", "dti","annual_inc", "loan_status"))
+remove(loan) #para que no ocupe memoria
+
+```
+
+Analisis descriptivo
+
+```{r}
+loan2 <- na.omit(loan2)
+```
+
+
+```{r}
+skim(loan2)
+```
+```{r}
+#Selecciono unicamente charged off y fully paid ya que son los únicos clientes que me interesan.
+variables_seleccionadas <- loan2[(loan2$loan_status == "Charged Off" | loan2$loan_status == "Fully Paid"),]
+```
+
+
+```{r}
+loan2 <- dummy.data.frame(loan2)
+loan2 <- dummy.data.frame(loan2,
+                                 names = "home_ownership")
+loan2 <- dummy.data.frame(loan2,
+                                 names = "grade")
+```
+
+
+```{r}
+loan2$loan_status = as.factor(loan2$loan_status)
+loan2$loan_status = as.numeric(loan2$loan_status)
+loan2$loan_status[loan2$loan_status == 1 | loan2$loan_status == 3 | loan2$loan_status == 4] <- 1
+loan2$loan_status[loan2$loan_status == 2 | loan2$loan_status == 5 | loan2$loan_status == 6 | loan2$loan_status == 7 | loan2$loan_status == 8 | loan2$loan_status == 9 | loan2$loan_status == 10] <- 0
+```
+
+
+
+```{r}
+set.seed(1234)
+
+n = nrow(loan2)
+id_train <- sample(1:n, 0.80*n)
+loanfinal.train <- loan2[id_train,] 
+loanfinal.test <- loan2[-id_train,]
+
+loan2$loan_status = as.factor(loan2$loan_status)
+```
+
+```{r}
+modelo1 = glm(loan_status ~ . -gradeG -home_ownershipMORTGAGE, family = "binomial", data = loanfinal.train)
+summary(modelo1)
+```
+
+```{r}
+summary(modelo1)
+```
+
+```{r}
+modelo2  <- glm(loan_status ~ . -gradeG -home_ownershipMORTGAGE -home_ownershipANY -home_ownershipNONE, family = "binomial", data = loanfinal.train)
+
+summary(modelo2)
+
+```
+
+```{r}
+BIC(modelo1)
+BIC(modelo2)
+
+```
+Nos quedamos con el modelo 2
+
+Clculamos la probabilidad de corte eligiendo la más óptima
+```{r}
+#define the search grid from 0.01 to 0.99
+
+searchgrid = seq(0.01, 0.99, 0.01)
+
+#result is a 99x2 matrix, the 1st col stores the cut-off p, the 2nd column stores the cost
+
+result = cbind(searchgrid, NA)
+
+#in the cost function, both r and pi are vectors, r=truth, pi=predicted probabilit
+
+
+cost1 <- function(r, pi){
+weight1 = 10
+weight0 = 1
+c1 = (r==1)&(pi<pcut) #logical vector - true if actual 1 but predict 0
+c0 = (r==0)&(pi>pcut) #logical vector - true if actual 0 but predict 1
+return(mean(weight1*c1+weight0*c0))
+}
+
+modelo2  <- glm(loan_status ~ . -gradeG -home_ownershipMORTGAGE -home_ownershipANY -home_ownershipNONE, family = "binomial", data = loanfinal.train);
+prob <- predict(modelo2,type="response")
+for(i in 1:length(searchgrid))
+{
+pcut <- result[i,1]
+#assign the cost to the 2nd col
+result[i,2] <- cost1(loanfinal.train$loan_status, prob)
+}
+plot(result, ylab="Cost in Training Set")
+```
+
+
+```{r}
+result[which.min(result[,2]),]
+```
+
+Nuestro cut-off coincidiria con el minimo el cual se corresponde con el 0.456
+
+Calculamos la matriz de confusion
+```{r}
+prob.modelo2.insample <- predict(modelo2,type="response")
+predicted.modelo2.insample <- prob.modelo2.insample > 0.4561454
+predicted.modelo2.insample <- as.numeric(predicted.modelo2.insample)
+```
+
+```{r}
+table(loanfinal.train$loan_status, predicted.modelo2.insample, dnn=c("Truth","Predicted"))
+```
+
+Calculamos la tasa de error
+
+```{r}
+mean(ifelse(loanfinal.train$loan_status != predicted.modelo2.insample, 1, 0))
+```
+
+Fuera de la muestra, test
+
+```{r}
+prob.modelo2.outsample <- predict(modelo2,loanfinal.test,type="response")
+predicted.modelo2.outsample <- prob.modelo2.outsample> 0.4561454 
+predicted.modelo2.outsample <- as.numeric(predicted.modelo2.outsample)
+table(loanfinal.test$loan_status, predicted.modelo2.outsample, dnn=c("Truth","Predicted"))
+```
+
+se calcula la tasa de error
+```{r}
+mean(ifelse(loanfinal.test$loan_status != predicted.modelo2.outsample, 1, 0))
+```
+
+La tasa de error fuera de la muestra es inferior a la tasa de error de dentro de la muestra, siguiendo la matriz de confusión y comparándolas realmente observamos que preferimos no conceder préstamos a gente que si nos lo puede devolver que al contrario.
+
+Curva ROC
+
+Nos instalamos el paquete verification
+```{r}
+library(verification)
+```
+
+```{r}
+roc.plot(loanfinal.test$loan_status == '1', prob.modelo2.outsample)
+```
+
+```{r}
+roc.plot(loanfinal.test$loan_status == '1', prob.modelo2.outsample)$roc.vol
+```
+
+comparacion
+
+```{r}
+prob.modelo1.outsample <- predict(modelo1,loanfinal.test,type="response")
+roc.plot(x= loanfinal.test$loan_status == '1', pred=cbind(prob.modelo1.outsample,prob.modelo2.outsample), legend=TRUE, leg.text=c("Full Model","X_3, X_8, and X_11_2"))$roc.vol
+```
+
+
+
+```{r}
+modelo3<- glm(loan_status ~ . -gradeG -home_ownershipMORTGAGE -home_ownershipANY -home_ownershipNONE -home_ownershipRENT, family = "binomial", data = loanfinal.train)
+summary(modelo3)
+```
+
+```{r}
+BIC(modelo1)
+BIC(modelo2)
+BIC(modelo3)
+```
+
+```{r}
+prob.modelo3.outsample <- predict(modelo3,loanfinal.test,type="response")
+predicted.modelo3.outsample <- prob.modelo3.outsample> 0.4561454 
+predicted.modelo3.outsample <- as.numeric(predicted.modelo3.outsample)
+table(loanfinal.test$loan_status, predicted.modelo3.outsample, dnn=c("Truth","Predicted"))
+```
+
+
+```{r}
+prob.modelo2.outsample <- predict(modelo2,loanfinal.test,type="response")
+roc.plot(x= loanfinal.test$loan_status == '1', pred=cbind(prob.modelo2.outsample,prob.modelo3.outsample), legend=TRUE, leg.text=c("Full Model","X_3, X_8, and X_11_2"))$roc.vol
+```
+
+
+
+
+
