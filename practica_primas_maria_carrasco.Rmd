@@ -1,0 +1,198 @@
+---
+title: "primas_mapfre"
+author: "Maria Carrasco Melendez"
+date: "11/14/2019"
+output:
+   pdf_document:
+    latex_engine: xelatex
+---
+
+```{r}
+require(forecast)
+library(xts)
+library(zoo)
+require(ggplot2)
+library(ggfortify) #Plot Monthplot
+```
+
+Cargamos el csv.
+
+```{r}
+library(readr)
+primas <- read_delim("Primas_mapfre.csv", 
+    ";", escape_double = FALSE, col_types = cols(Fecha = col_date(format = "%m/%d/%Y")), 
+    trim_ws = TRUE)
+```
+
+```{r}
+primas <- na.omit(primas)
+```
+
+Convertimos a xts, para poder trabajar con series temporales. De esta manera, se le aplicarán métodos como el zoo.
+
+```{r}
+xprimas <- xts(primas$Primas_vida, order.by = as.Date(primas$Fecha,"%Y%m%d"),frequency=4)
+```
+
+Convierte los datos en trimestrales, quiero trabajar con series trimestral.
+
+```{r}
+xprimas <- to.quarterly(xprimas)
+```
+
+Aplicamos el método zoo. La peculiaridad de este método a diferencia del xts es que convierte las series temporales a trimestrales y el anterior a diarios.
+
+```{r}
+zprimas=as.zoo(xprimas$xprimas.Close)
+```
+
+Cambiamos nombre.
+
+```{r}
+names(zprimas)="primas"
+```
+
+Gráfica
+
+```{r}
+autoplot(zprimas)+ggtitle("Primas Trimestrales Mapfre")+xlab("Trimestres")+ylab("Primas")
+```
+
+Gráfica trimestral
+
+```{r}
+ggfreqplot(as.ts(zprimas), freq = 4, nrow = 1, facet.labeller = c("1T","2T","3T","4T")) + ggtitle("Primas Trimestrales")
+```
+
+Elimino los 4 últimos datos, se estima con todos menos con estos últimos
+
+```{r}
+cOmit=4
+nObs=length(zprimas)
+```
+
+Creo la serie observada de primas
+```{r}
+oprimas <- window(zprimas, start = index(zprimas[1]), end = index(zprimas[nObs-cOmit]))
+
+```
+
+
+```{r}
+etsfit <- ets(oprimas) 
+```
+
+```{r}
+fprimas.ets <- forecast(etsfit)
+summary(fprimas.ets)
+```
+
+```{r}
+plot(fprimas.ets)
+lines(window(zprimas),type="o")
+```
+```{r}
+matrix(c(fprimas.ets$mean[1:cOmit], zprimas[(nObs-cOmit+1) : nObs]), ncol=2)
+```
+```{r}
+etsfit2 <- ets(oprimas, damped = TRUE)
+fprimas.ets2 <- forecast(etsfit2)
+summary(fprimas.ets2)
+```
+```{r}
+plot(fprimas.ets2)
+lines(window(zprimas),type="o")
+```
+
+
+```{r}
+matrix(c(fprimas.ets2$mean[1:cOmit],fprimas.ets$mean[1:cOmit],zprimas[(nObs-cOmit+1):nObs]),ncol=3)
+```
+```{r}
+plot(fprimas.ets2)
+lines(window(zprimas),type="o")
+lines(fprimas.ets$mean,type="o",col="red")
+```
+
+Segunda variable
+
+```{r}
+xprimas2<- xts(primas$Primas_no_vida, order.by = as.Date(primas$Fecha,"%Y%m%d"),frequency=4)
+```
+
+```{r}
+xprimas2 <- to.quarterly(xprimas2)
+```
+
+```{r}
+zprimas2 <- as.zoo(xprimas2$xprimas2.Close)
+```
+
+```{r}
+names(zprimas2)="primas"
+```
+
+```{r}
+autoplot(zprimas2)+ggtitle("Primas Trimestrales Mapfre")+xlab("Trimestres")+ylab("Primas")
+```
+
+```{r}
+ggfreqplot(as.ts(zprimas2), freq = 4, nrow = 1, facet.labeller = c("1T","2T","3T","4T")) + ggtitle("Primas Trimestrales")
+```
+
+```{r}
+nObs = length(zprimas2)
+```
+
+```{r}
+oprimas2 <- window(zprimas2, start = index(zprimas2[1]), end = index(zprimas2[nObs-cOmit]))
+```
+
+```{r}
+etsfit2 <- ets(oprimas2) 
+```
+
+```{r}
+fnoprimas.ets <- forecast(etsfit2)
+summary(fnoprimas.ets)
+```
+```{r}
+plot(fnoprimas.ets)
+lines(window(zprimas2),type="o")
+```
+
+
+```{r}
+matrix(c(fnoprimas.ets$mean[1:cOmit], zprimas2[(nObs-cOmit+1) : nObs]), ncol=2)
+```
+
+```{r}
+etsfit2 <- ets(oprimas, damped = TRUE)
+fprimas.ets2 <- forecast(etsfit2)
+summary(fprimas.ets2)
+```
+
+```{r}
+matrix(c(fprimas.ets2$mean[1:cOmit],fprimas.ets$mean[1:cOmit],zprimas[(nObs-cOmit+1):nObs]),ncol=3)
+```
+
+```{r}
+plot(fprimas.ets2)
+lines(window(zprimas),type="o")
+lines(fprimas.ets$mean,type="o",col="red")
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
